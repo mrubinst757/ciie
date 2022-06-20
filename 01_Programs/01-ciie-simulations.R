@@ -1,5 +1,7 @@
-source("../../Depression/Programs/01_Analysis/02_AnalyzeData/00-mediation-functions.R")
+fs::file_copy("../../Depression/Programs/01_Analysis/02_AnalyzeData/00-mediation-functions.R",
+          "01_Programs/00-mediation-functions.R", TRUE)
 source("01_Programs/simulation-funs.R")
+source("01_Programs/00-mediation-functions.R")
 library(SuperLearner)
 
 TProc <- function(result, rate) {
