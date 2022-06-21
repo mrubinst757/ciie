@@ -325,6 +325,17 @@ EstimateCATEFuns <- function(folds, sl.libs, sample_split, return_data = FALSE) 
   mjd <- ifelse(sample_split == TRUE, FALSE, TRUE)
   
   test_dat <- CalculateIDEEIFs(ProcessAllData(test_dat, marg_jd = mjd))
+  test_dat$eif_prop <- with(test_dat, eif_m1_a1 / eif_te_2 - 
+                              eif_te * (eif_m1_t5_a1 / eif_te_2^2) + 
+                              eif_m1_t5_a1 / eif_te_2)
+
+  test_dat$prop <- with(test_dat, eif_m1_t5_a1 / eif_te_2)
+  
+  Xmat <- cbind(1, test_dat$X)
+  Xmat2 <- cbind(1, test_dat$X, test_dat$X^2)
+  
+  XXi  <- solve(t(Xmat) %*% Xmat)
+  XXi2  <- solve(t(Xmat2) %*% Xmat2)
   
   # Run Projection estimator
   model1 <- lm(eif_m1_a1 ~ X, test_dat)
@@ -337,6 +348,11 @@ EstimateCATEFuns <- function(folds, sl.libs, sample_split, return_data = FALSE) 
   model7 <- lm(eif_te_2 ~ X, test_dat)
   model8 <- lm(eif_te_2 ~ poly(X, 2, raw = TRUE), test_dat)
   
+  model9  <- lm(eif_prop ~ X, test_dat)
+  model10 <- lm(eif_prop ~ poly(X, 2, raw = TRUE), test_dat)
+  model11 <- lm(prop ~ X, test_dat)
+  model12 <- lm(prop ~ poly(X, 2, raw = TRUE), test_dat)
+    
   varc1  <- sandwich::vcovHC(model1, type = "HC1")
   varc2  <- sandwich::vcovHC(model2, type = "HC1")
   varc3  <- sandwich::vcovHC(model3, type = "HC1")
@@ -346,17 +362,34 @@ EstimateCATEFuns <- function(folds, sl.libs, sample_split, return_data = FALSE) 
   varc6  <- sandwich::vcovHC(model6, type = "HC1")
   varc7  <- sandwich::vcovHC(model7, type = "HC1")
   varc8  <- sandwich::vcovHC(model8, type = "HC1")
+
+  varc9  <- sandwich::vcovHC(model9, type = "HC1")
+  varc10 <- sandwich::vcovHC(model10, type = "HC1")
+  varc11 <- sandwich::vcovHC(model11, type = "HC1")
+  varc12  <- sandwich::vcovHC(model12, type = "HC1")
   
   avgest1 <- coef(model1); avgest2 <- coef(model2); avgest3 <- coef(model3); avgest4 <- coef(model4)
   avgest5 <- coef(model5); avgest6 <- coef(model6); avgest7 <- coef(model7); avgest8 <- coef(model8)
+  avgest9 <- coef(model9); avgest10 <- coef(model10); avgest11 <- coef(model11); avgest12 <- coef(model12)
   
-  res.projection <- list(model = list(avgest1, avgest2, avgest3, avgest4, avgest5, avgest6, avgest7, avgest8), 
+  resid1 <- resid(model1); resid2 <- resid(model2); resid3 <- resid(model3); resid4 <- resid(model4)
+  resid5 <- resid(model5); resid6 <- resid(model6); resid7 <- resid(model7); resid8 <- resid(model8)
+
+  res.projection <- list(model = list(avgest1, avgest2, avgest3, avgest4, 
+                                      avgest5, avgest6, avgest7, avgest8,
+                                      avgest9, avgest10, avgest11, avgest12), 
                          vcov  = list(varc1, varc2, varc3, varc4,
-                                      varc5, varc6, varc7, varc8))
+                                      varc5, varc6, varc7, varc8,
+                                      varc9, varc10, varc11, varc12),
+                         resid = list(resid1, resid2, resid3, resid4,
+                                      resid5, resid6, resid7, resid8),
+                         XXi  = list(XXi, XXi2),
+                         Xmat = list(Xmat, Xmat2))
   
   # Run DR Learner
   drl_model    <- smooth.spline(test_dat$X, test_dat$eif_m1_a1)
   drl_model_te <- smooth.spline(test_dat$X, test_dat$eif_te)
+  drl_model_prop <- smooth.spline(test_dat$X, test_dat$eif_prop)
   
   plugin_model <- list(mu.mod = y1_mod, 
                        m1.1.mod = m1.1_mod,
@@ -367,13 +400,17 @@ EstimateCATEFuns <- function(folds, sl.libs, sample_split, return_data = FALSE) 
   
   if (return_data == TRUE) {
     res <- list(proj = res.projection, 
-                drl_model = list(drl_model = drl_model, drl_model_te = drl_model_te), 
+                drl_model = list(drl_model = drl_model, 
+                                 drl_model_te = drl_model_te,
+                                 drl_model_prop = drl_model_prop), 
                 plugin = plugin_model, 
                 data = test_dat)
   }
   if (return_data == FALSE) {
     res <- list(proj = res.projection, 
-                drl_model = list(drl_model = drl_model, drl_model_te = drl_model_te), 
+                drl_model = list(drl_model = drl_model, 
+                                 drl_model_te = drl_model_te,
+                                 drl_model_prop = drl_model_prop), 
                 plugin = plugin_model)
   }
   return(res)
@@ -389,51 +426,55 @@ EstimateCATEFuns <- function(folds, sl.libs, sample_split, return_data = FALSE) 
 #'
 #' @return dataframe containing results
 ProcessResults <- function(result_list, point, test_data, truth_vector) {
-  res1 <- result_list[[1]]
-  res2 <- result_list[[2]]
-  res3 <- result_list[[3]]
+  #res1 <- result_list[[1]]
+  res1 <- result_list[[1]] #non-parametric nuisance estimation
+  res2 <- result_list[[2]] #parametric nuisance estimation
   
   # IIE via M1
-  drl.pred.ss  <- predict(res1$drl_model$drl_model, point)$y
-  drl.pred.nss <- predict(res2$drl_model$drl_model, point)$y
-  plugin.pred.ss  <- PredictPlugIn(res1$plugin, point) # add plug-in total effect?
-  plugin.pred.nss <- PredictPlugIn(res2$plugin, point)
+  #drl.pred.ss  <- predict(res1$drl_model$drl_model, point)$y
+  drl.pred.nss <- predict(res1$drl_model$drl_model, point)$y
+  #plugin.pred.ss  <- PredictPlugIn(res1$plugin, point) # add plug-in total effect?
+  plugin.pred.nss <- PredictPlugIn(res1$plugin, point)
   
-  proj.pred.lin.glm <- c(1, point$X) %*% res3$proj$model[[1]] 
-  proj.pred.quad.glm <- c(1, point$X, point$X^2) %*% res3$proj$model[[2]]
-  proj.pred.lin.np <- c(1, point$X) %*% res2$proj$model[[1]] 
-  proj.pred.quad.np <- c(1, point$X, point$X^2) %*% res2$proj$model[[2]]
+  proj.pred.lin.glm <- c(1, point$X) %*% res2$proj$model[[1]] 
+  proj.pred.quad.glm <- c(1, point$X, point$X^2) %*% res2$proj$model[[2]]
+  proj.pred.lin.np <- c(1, point$X) %*% res1$proj$model[[1]] 
+  proj.pred.quad.np <- c(1, point$X, point$X^2) %*% res1$proj$model[[2]]
   
-  proj.pred.lin.glm.plugin <- c(1, point$X) %*% res3$proj$model[[3]]
-  proj.pred.quad.glm.plugin <- c(1, point$X, point$X^2) %*% res3$proj$model[[4]]
-  proj.pred.lin.np.plugin <- c(1, point$X) %*% res2$proj$model[[3]] 
-  proj.pred.quad.np.plugin <- c(1, point$X, point$X^2) %*% res2$proj$model[[4]]
+  proj.pred.lin.glm.plugin <- c(1, point$X) %*% res2$proj$model[[3]]
+  proj.pred.quad.glm.plugin <- c(1, point$X, point$X^2) %*% res2$proj$model[[4]]
+  proj.pred.lin.np.plugin <- c(1, point$X) %*% res1$proj$model[[3]] 
+  proj.pred.quad.np.plugin <- c(1, point$X, point$X^2) %*% res1$proj$model[[4]]
   
-  drl.pred.ss.var <- CalcSSVar(res1$drl_model$drl_model, test_data$X, point$X)
-  drl.pred.nss.var <- CalcSSVar(res2$drl_model$drl_model, test_data$X, point$X)
-  plugin.pred.ss.var <- NA
+  #drl.pred.ss.var <- CalcSSVar(res1$drl_model$drl_model, test_data$X, point$X)
+  drl.pred.nss.var <- CalcSSVar(res1$drl_model$drl_model, test_data$X, point$X)
+  #plugin.pred.ss.var <- NA
   plugin.pred.nss.var <- NA
-  proj.lin.glm.var <- c(1, point$X) %*% res3$proj$vcov[[1]] %*% c(1, point$X)
-  proj.quad.glm.var <- c(1, point$X, point$X^2) %*% res3$proj$vcov[[2]] %*% c(1, point$X, point$X^2)
-  proj.lin.np.var <- c(1, point$X) %*% res2$proj$vcov[[1]] %*% c(1, point$X)
-  proj.quad.np.var <- c(1, point$X, point$X^2) %*% res2$proj$vcov[[2]] %*% c(1, point$X, point$X^2)
+  proj.lin.glm.var <- c(1, point$X) %*% res2$proj$vcov[[1]] %*% c(1, point$X)
+  proj.quad.glm.var <- c(1, point$X, point$X^2) %*% res2$proj$vcov[[2]] %*% c(1, point$X, point$X^2)
+  proj.lin.np.var <- c(1, point$X) %*% res1$proj$vcov[[1]] %*% c(1, point$X)
+  proj.quad.np.var <- c(1, point$X, point$X^2) %*% res1$proj$vcov[[2]] %*% c(1, point$X, point$X^2)
   
-  proj.lin.glm.var.pi <- c(1, point$X) %*% res3$proj$vcov[[3]] %*% c(1, point$X)
-  proj.quad.glm.var.pi <- c(1, point$X, point$X^2) %*% res3$proj$vcov[[4]] %*% c(1, point$X, point$X^2)
-  proj.lin.np.var.pi <- c(1, point$X) %*% res2$proj$vcov[[3]] %*% c(1, point$X)
-  proj.quad.np.var.pi <- c(1, point$X, point$X^2) %*% res2$proj$vcov[[4]] %*% c(1, point$X, point$X^2)
+  proj.lin.glm.var.pi <- c(1, point$X) %*% res2$proj$vcov[[3]] %*% c(1, point$X)
+  proj.quad.glm.var.pi <- c(1, point$X, point$X^2) %*% res2$proj$vcov[[4]] %*% c(1, point$X, point$X^2)
+  proj.lin.np.var.pi <- c(1, point$X) %*% res1$proj$vcov[[3]] %*% c(1, point$X)
+  proj.quad.np.var.pi <- c(1, point$X, point$X^2) %*% res1$proj$vcov[[4]] %*% c(1, point$X, point$X^2)
   
   res_med <- tibble(
     ests = c(proj.pred.lin.glm, proj.pred.quad.glm, 
              proj.pred.lin.np, proj.pred.quad.np,
-             drl.pred.ss, drl.pred.nss,
-             plugin.pred.ss, plugin.pred.nss,
+             #drl.pred.ss, 
+             drl.pred.nss, 
+             #plugin.pred.ss, 
+             plugin.pred.nss,
              proj.pred.lin.glm.plugin, proj.pred.quad.glm.plugin, 
              proj.pred.lin.np.plugin, proj.pred.quad.np.plugin),
     var = c(proj.lin.glm.var, proj.quad.glm.var, 
             proj.lin.np.var, proj.quad.np.var, 
-            drl.pred.ss.var, drl.pred.nss.var,
-            plugin.pred.ss.var, plugin.pred.nss.var,
+            #drl.pred.ss.var, 
+            drl.pred.nss.var,
+            #plugin.pred.ss.var, 
+            plugin.pred.nss.var,
             proj.lin.glm.var.pi, proj.quad.glm.var.pi, 
             proj.lin.np.var.pi, proj.quad.np.var.pi)) %>%
     unnest() %>%
@@ -442,57 +483,62 @@ ProcessResults <- function(result_list, point, test_data, truth_vector) {
       lci = ests - 1.96*sqrt(var), uci = ests + 1.96*sqrt(var),
       type = c("Projection-Linear", "Projection-Quad", 
                "Projection-Linear", "Projection-Quad",
-               "DRLearner", "DRLearner", 
-               "Plugin-DRL", "Plugin-DRL", 
+               #"DRLearner", "DRLearner", 
+               #"Plugin-DRL", "Plugin-DRL", 
+               "DRLearner", "Plugin-DRL",
                "Proj-Lin-PI", "Proj-Quad-PI", 
                "Proj-Lin-PI", "Proj-Quad-PI"),
-      nuisance_est = c("GLM", "GLM", "NP", "NP", "NP", "NP",
-                       "NP", "NP", "GLM", "GLM", "NP", "NP"),
-      sample_split = c(NA, NA, NA, NA, "Yes", "No", "Yes", "No", NA, NA, NA, NA),
+      nuisance_est = c("GLM", "GLM", "NP", "NP", "NP", 
+                       "NP", "GLM", "GLM", "NP", "NP"),
+      #sample_split = c(NA, NA, NA, NA, "Yes", "No", "Yes", "No", NA, NA, NA, NA),
       truth = truth_vector$mediation)
   
   # Total effect
-  drl.pred.ss.te  <- predict(res1$drl_model$drl_model_te, point)$y
-  drl.pred.nss.te <- predict(res2$drl_model$drl_model_te, point)$y
-  plugin.pred.ss.te  <- PredictPlugIn(res1$plugin, point, "cate") # add plug-in total effect?
-  plugin.pred.nss.te <- PredictPlugIn(res2$plugin, point, "cate")
+  #drl.pred.ss.te  <- predict(res1$drl_model$drl_model_te, point)$y
+  drl.pred.nss.te <- predict(res1$drl_model$drl_model_te, point)$y
+  #plugin.pred.ss.te  <- PredictPlugIn(res1$plugin, point, "cate") # add plug-in total effect?
+  plugin.pred.nss.te <- PredictPlugIn(res1$plugin, point, "cate")
   
-  proj.pred.lin.glm.te <- c(1, point$X) %*% res3$proj$model[[5]] 
-  proj.pred.quad.glm.te <- c(1, point$X, point$X^2) %*% res3$proj$model[[6]]
-  proj.pred.lin.np.te <- c(1, point$X) %*% res2$proj$model[[5]] 
-  proj.pred.quad.np.te <- c(1, point$X, point$X^2) %*% res2$proj$model[[6]]
+  proj.pred.lin.glm.te <- c(1, point$X) %*% res2$proj$model[[5]] 
+  proj.pred.quad.glm.te <- c(1, point$X, point$X^2) %*% res2$proj$model[[6]]
+  proj.pred.lin.np.te <- c(1, point$X) %*% res1$proj$model[[5]] 
+  proj.pred.quad.np.te <- c(1, point$X, point$X^2) %*% res1$proj$model[[6]]
   
-  proj.pred.lin.glm.plugin.te <- c(1, point$X) %*% res3$proj$model[[7]]
-  proj.pred.quad.glm.plugin.te <- c(1, point$X, point$X^2) %*% res3$proj$model[[8]]
-  proj.pred.lin.np.plugin.te <- c(1, point$X) %*% res2$proj$model[[7]] 
-  proj.pred.quad.np.plugin.te <- c(1, point$X, point$X^2) %*% res2$proj$model[[8]]
+  proj.pred.lin.glm.plugin.te <- c(1, point$X) %*% res2$proj$model[[7]]
+  proj.pred.quad.glm.plugin.te <- c(1, point$X, point$X^2) %*% res2$proj$model[[8]]
+  proj.pred.lin.np.plugin.te <- c(1, point$X) %*% res1$proj$model[[7]] 
+  proj.pred.quad.np.plugin.te <- c(1, point$X, point$X^2) %*% res1$proj$model[[8]]
   
-  drl.pred.ss.var.te <- CalcSSVar(res1$drl_model$drl_model_te, test_data$X, point$X)
-  drl.pred.nss.var.te <- CalcSSVar(res2$drl_model$drl_model_te, test_data$X, point$X)
-  plugin.pred.ss.var.te <- NA
+  #drl.pred.ss.var.te <- CalcSSVar(res1$drl_model$drl_model_te, test_data$X, point$X)
+  drl.pred.nss.var.te <- CalcSSVar(res1$drl_model$drl_model_te, test_data$X, point$X)
+  #plugin.pred.ss.var.te <- NA
   plugin.pred.nss.var.te <- NA
   
-  proj.lin.glm.var.te <- c(1, point$X) %*% res3$proj$vcov[[5]] %*% c(1, point$X)
-  proj.quad.glm.var.te <- c(1, point$X, point$X^2) %*% res3$proj$vcov[[6]] %*% c(1, point$X, point$X^2)
-  proj.lin.np.var.te <- c(1, point$X) %*% res2$proj$vcov[[5]] %*% c(1, point$X)
-  proj.quad.np.var.te <- c(1, point$X, point$X^2) %*% res2$proj$vcov[[6]] %*% c(1, point$X, point$X^2)
+  proj.lin.glm.var.te <- c(1, point$X) %*% res2$proj$vcov[[5]] %*% c(1, point$X)
+  proj.quad.glm.var.te <- c(1, point$X, point$X^2) %*% res2$proj$vcov[[6]] %*% c(1, point$X, point$X^2)
+  proj.lin.np.var.te <- c(1, point$X) %*% res1$proj$vcov[[5]] %*% c(1, point$X)
+  proj.quad.np.var.te <- c(1, point$X, point$X^2) %*% res1$proj$vcov[[6]] %*% c(1, point$X, point$X^2)
   
-  proj.lin.glm.var.pi.te <- c(1, point$X) %*% res3$proj$vcov[[7]] %*% c(1, point$X)
-  proj.quad.glm.var.pi.te <- c(1, point$X, point$X^2) %*% res3$proj$vcov[[8]] %*% c(1, point$X, point$X^2)
-  proj.lin.np.var.pi.te <- c(1, point$X) %*% res2$proj$vcov[[7]] %*% c(1, point$X)
-  proj.quad.np.var.pi.te <- c(1, point$X, point$X^2) %*% res2$proj$vcov[[8]] %*% c(1, point$X, point$X^2)
+  proj.lin.glm.var.pi.te <- c(1, point$X) %*% res2$proj$vcov[[7]] %*% c(1, point$X)
+  proj.quad.glm.var.pi.te <- c(1, point$X, point$X^2) %*% res2$proj$vcov[[8]] %*% c(1, point$X, point$X^2)
+  proj.lin.np.var.pi.te <- c(1, point$X) %*% res1$proj$vcov[[7]] %*% c(1, point$X)
+  proj.quad.np.var.pi.te <- c(1, point$X, point$X^2) %*% res1$proj$vcov[[8]] %*% c(1, point$X, point$X^2)
   
   res_te <- tibble(
     ests = c(proj.pred.lin.glm.te, proj.pred.quad.glm.te, 
              proj.pred.lin.np.te, proj.pred.quad.np.te,
-             drl.pred.ss.te, drl.pred.nss.te,
-             plugin.pred.ss.te, plugin.pred.nss.te,
+             #drl.pred.ss.te, 
+             drl.pred.nss.te,
+             #plugin.pred.ss.te, 
+             plugin.pred.nss.te,
              proj.pred.lin.glm.plugin.te, proj.pred.quad.glm.plugin.te, 
              proj.pred.lin.np.plugin.te, proj.pred.quad.np.plugin.te),
     var = c(proj.lin.glm.var.te, proj.quad.glm.var.te, 
             proj.lin.np.var.te, proj.quad.np.var.te, 
-            drl.pred.ss.var.te, drl.pred.nss.var.te,
-            plugin.pred.ss.var.te, plugin.pred.nss.var.te,
+            #drl.pred.ss.var.te, 
+            drl.pred.nss.var.te,
+            #plugin.pred.ss.var.te, 
+            plugin.pred.nss.var.te,
             proj.lin.glm.var.pi.te, proj.quad.glm.var.pi.te, 
             proj.lin.np.var.pi.te, proj.quad.np.var.pi.te)) %>%
     unnest() %>%
@@ -500,58 +546,64 @@ ProcessResults <- function(result_list, point, test_data, truth_vector) {
       lci = ests - 1.96*sqrt(var), uci = ests + 1.96*sqrt(var),
       type = c("Projection-Linear", "Projection-Quad", 
                "Projection-Linear", "Projection-Quad",
-               "DRLearner", "DRLearner", 
-               "Plugin-DRL", "Plugin-DRL", 
+               #"DRLearner", "DRLearner", 
+               #"Plugin-DRL", "Plugin-DRL",
+               "DRLearner", "Plugin-DRL",
                "Proj-Lin-PI", "Proj-Quad-PI", 
                "Proj-Lin-PI", "Proj-Quad-PI"),
       estimand = "Total effect",
-      nuisance_est = c("GLM", "GLM", "NP", "NP", "NP", "NP",
-                       "NP", "NP", "GLM", "GLM", "NP", "NP"),
-      sample_split = c(NA, NA, NA, NA, "Yes", "No", "Yes", "No", NA, NA, NA, NA),
+      nuisance_est = c("GLM", "GLM", "NP", "NP", "NP",
+                       "NP", "GLM", "GLM", "NP", "NP"),
+      #sample_split = c(NA, NA, NA, NA, "Yes", "No", "Yes", "No", NA, NA, NA, NA),
       truth = truth_vector$total_effect)
-  
+
   # Proportion mediated
-  drl.pred.ss.prop  <- drl.pred.ss / drl.pred.ss.te  
-  drl.pred.nss.prop <- drl.pred.nss / drl.pred.nss.te
-  plugin.pred.ss.prop  <- plugin.pred.ss / plugin.pred.ss.te
-  plugin.pred.nss.prop <- plugin.pred.nss / plugin.pred.ss.te
   
-  proj.pred.lin.glm.prop  <- proj.pred.lin.glm / proj.pred.lin.glm.te
-  proj.pred.quad.glm.prop <- proj.pred.quad.glm / proj.pred.quad.glm.te 
-  proj.pred.lin.np.prop   <-  proj.pred.lin.np / proj.pred.lin.np.te
-  proj.pred.quad.np.prop  <- proj.pred.quad.np / proj.pred.quad.np.te
+  #drl.pred.ss.prop  <- predict(res1$drl_model$drl_model_prop, point)$y
+  drl.pred.nss.prop <- predict(res1$drl_model$drl_model_prop, point)$y
+  #plugin.pred.ss.prop  <- PredictPlugIn(res1$plugin, point, "prop.med") 
+  plugin.pred.nss.prop <- PredictPlugIn(res1$plugin, point, "prop.med")
   
-  proj.pred.lin.glm.plugin.prop  <- proj.pred.lin.glm.plugin / proj.pred.lin.glm.plugin.te
-  proj.pred.quad.glm.plugin.prop <- proj.pred.quad.glm.plugin / proj.pred.quad.glm.plugin.te
-  proj.pred.lin.np.plugin.prop   <- proj.pred.lin.np.plugin / proj.pred.lin.np.plugin.te  
-  proj.pred.quad.np.plugin.prop  <- proj.pred.quad.np.plugin / proj.pred.quad.np.plugin.te
+  proj.pred.lin.glm.prop <- c(1, point$X) %*% res2$proj$model[[9]] 
+  proj.pred.quad.glm.prop <- c(1, point$X, point$X^2) %*% res2$proj$model[[10]]
+  proj.pred.lin.np.prop <- c(1, point$X) %*% res1$proj$model[[9]] 
+  proj.pred.quad.np.prop <- c(1, point$X, point$X^2) %*% res1$proj$model[[10]]
   
-  drl.pred.ss.var.prop <- drl.pred.ss.prop^2 * (drl.pred.ss.var / drl.pred.ss^2 + drl.pred.ss.var.te / drl.pred.ss.te^2)
-  drl.pred.nss.var.prop <- drl.pred.nss.prop^2 * (drl.pred.nss.var / drl.pred.ss^2 + drl.pred.nss.var.te / drl.pred.nss.te^2)
-  plugin.pred.ss.var.prop <- NA
+  proj.pred.lin.glm.plugin.prop <- c(1, point$X) %*% res2$proj$model[[11]]
+  proj.pred.quad.glm.plugin.prop <- c(1, point$X, point$X^2) %*% res2$proj$model[[12]]
+  proj.pred.lin.np.plugin.prop <- c(1, point$X) %*% res1$proj$model[[11]] 
+  proj.pred.quad.np.plugin.prop <- c(1, point$X, point$X^2) %*% res1$proj$model[[12]]
+  
+  #drl.pred.ss.var.prop <- CalcSSVar(res1$drl_model$drl_model_prop, test_data$X, point$X)
+  drl.pred.nss.var.prop <- CalcSSVar(res1$drl_model$drl_model_prop, test_data$X, point$X)
+  #plugin.pred.ss.var.prop <- NA
   plugin.pred.nss.var.prop <- NA
   
-  proj.lin.glm.var.prop  <- proj.pred.lin.glm.prop^2 * (proj.lin.glm.var / proj.pred.lin.glm^2 + proj.lin.glm.var.te / proj.pred.lin.glm.te^2)
-  proj.quad.glm.var.prop <- proj.pred.quad.glm.prop^2 * (proj.quad.glm.var / proj.pred.quad.glm^2 + proj.quad.glm.var.te / proj.pred.quad.glm.te^2)
-  proj.lin.np.var.prop   <- proj.pred.lin.np.prop^2 * (proj.lin.np.var / proj.pred.lin.np^2 + proj.lin.np.var.te / proj.pred.lin.np.te^2)
-  proj.quad.np.var.prop  <- proj.pred.quad.np.prop^2 * (proj.quad.np.var / proj.pred.quad.np^2 + proj.quad.np.var.te / proj.pred.quad.np.te^2)
+  proj.lin.glm.var.prop <- c(1, point$X) %*% res2$proj$vcov[[9]] %*% c(1, point$X)
+  proj.quad.glm.var.prop <- c(1, point$X, point$X^2) %*% res2$proj$vcov[[10]] %*% c(1, point$X, point$X^2)
+  proj.lin.np.var.prop <- c(1, point$X) %*% res1$proj$vcov[[9]] %*% c(1, point$X)
+  proj.quad.np.var.prop <- c(1, point$X, point$X^2) %*% res1$proj$vcov[[10]] %*% c(1, point$X, point$X^2)
   
-  proj.lin.glm.var.pi.prop  <- proj.pred.lin.glm.plugin.prop^2 * (proj.lin.glm.var.pi / proj.pred.lin.glm.plugin^2 + proj.lin.glm.var.pi.te / proj.pred.lin.glm.plugin.te^2)
-  proj.quad.glm.var.pi.prop <- proj.pred.quad.glm.plugin.prop^2 * (proj.quad.glm.var.pi / proj.pred.quad.glm.plugin^2 + proj.quad.glm.var.pi.te / proj.pred.quad.glm.plugin.te^2) 
-  proj.lin.np.var.pi.prop   <- proj.pred.lin.np.plugin.prop^2 * (proj.lin.np.var.pi / proj.pred.lin.np.plugin^2 + proj.lin.np.var.pi.te / proj.pred.lin.np.plugin.te^2)
-  proj.quad.np.var.pi.prop  <- proj.pred.quad.np.plugin.prop^2 * (proj.quad.np.var.pi / proj.pred.quad.np.plugin^2 + proj.quad.np.var.pi.te / proj.pred.quad.np.plugin.te^2) 
+  proj.lin.glm.var.pi.prop <- c(1, point$X) %*% res2$proj$vcov[[11]] %*% c(1, point$X)
+  proj.quad.glm.var.pi.prop <- c(1, point$X, point$X^2) %*% res2$proj$vcov[[12]] %*% c(1, point$X, point$X^2)
+  proj.lin.np.var.pi.prop <- c(1, point$X) %*% res1$proj$vcov[[11]] %*% c(1, point$X)
+  proj.quad.np.var.pi.prop <- c(1, point$X, point$X^2) %*% res1$proj$vcov[[12]] %*% c(1, point$X, point$X^2)
   
   res_prop <- tibble(
     ests = c(proj.pred.lin.glm.prop, proj.pred.quad.glm.prop, 
              proj.pred.lin.np.prop, proj.pred.quad.np.prop,
-             drl.pred.ss.prop, drl.pred.nss.prop,
-             plugin.pred.ss.prop, plugin.pred.nss.prop,
+             #drl.pred.ss.prop, 
+             drl.pred.nss.prop,
+             #plugin.pred.ss.prop, 
+             plugin.pred.nss.prop,
              proj.pred.lin.glm.plugin.prop, proj.pred.quad.glm.plugin.prop, 
              proj.pred.lin.np.plugin.prop, proj.pred.quad.np.plugin.prop),
     var = c(proj.lin.glm.var.prop, proj.quad.glm.var.prop, 
             proj.lin.np.var.prop, proj.quad.np.var.prop, 
-            drl.pred.ss.var.prop, drl.pred.nss.var.prop,
-            plugin.pred.ss.var.prop, plugin.pred.nss.var.prop,
+            #drl.pred.ss.var.prop, 
+            drl.pred.nss.var.prop,
+            #plugin.pred.ss.var.prop, 
+            plugin.pred.nss.var.prop,
             proj.lin.glm.var.pi.prop, proj.quad.glm.var.pi.prop, 
             proj.lin.np.var.pi.prop, proj.quad.np.var.pi.prop)) %>%
     unnest() %>%
@@ -559,18 +611,125 @@ ProcessResults <- function(result_list, point, test_data, truth_vector) {
       lci = ests - 1.96*sqrt(var), uci = ests + 1.96*sqrt(var),
       type = c("Projection-Linear", "Projection-Quad", 
                "Projection-Linear", "Projection-Quad",
-               "DRLearner", "DRLearner", 
-               "Plugin-DRL", "Plugin-DRL", 
+               #"DRLearner", "DRLearner", 
+               #"Plugin-DRL", "Plugin-DRL",
+               "DRLearner", "Plugin-DRL",
                "Proj-Lin-PI", "Proj-Quad-PI", 
                "Proj-Lin-PI", "Proj-Quad-PI"),
       estimand = "Proportion mediated",
-      nuisance_est = c("GLM", "GLM", "NP", "NP", "NP", "NP",
-                       "NP", "NP", "GLM", "GLM", "NP", "NP"),
-      sample_split = c(NA, NA, NA, NA, "Yes", "No", "Yes", "No", NA, NA, NA, NA),
+      nuisance_est = c("GLM", "GLM", "NP", "NP", "NP",
+                       "NP", "GLM", "GLM", "NP", "NP"),
+      #sample_split = c(NA, NA, NA, NA, "Yes", "No", "Yes", "No", NA, NA, NA, NA),
+      truth = truth_vector$proportion)
+  
+  # Proportion mediated -- alternate
+  X <- res1$proj$Xmat[[1]]
+  XXi <- res1$proj$XXi[[1]]
+
+  X2 <- res1$proj$Xmat[[2]]
+  XXi2 <- res1$proj$XXi[[2]]
+  
+  covmat.np.dr.lin <- XXi %*% t(X) %*% diag(res1$proj$resid[[1]]*res1$proj$resid[[5]]) %*% X %*% XXi
+  covmat.np.dr.qad <- XXi2 %*% t(X2) %*% diag(res1$proj$resid[[2]]*res1$proj$resid[[6]]) %*% X2 %*% XXi2
+  covmat.np.pi.lin <- XXi %*% t(X) %*% diag(res1$proj$resid[[3]]*res1$proj$resid[[7]]) %*% X %*% XXi
+  covmat.np.pi.qad <- XXi2 %*% t(X2) %*% diag(res1$proj$resid[[4]]*res1$proj$resid[[8]]) %*% X2 %*% XXi2
+
+  covmat.glm.dr.lin <- XXi %*% t(X) %*% diag(res2$proj$resid[[1]]*res2$proj$resid[[5]]) %*% X %*% XXi
+  covmat.glm.dr.qad <- XXi2 %*% t(X2) %*% diag(res2$proj$resid[[2]]*res2$proj$resid[[6]]) %*% X2 %*% XXi2
+  covmat.glm.pi.lin <- XXi %*% t(X) %*% diag(res2$proj$resid[[3]]*res2$proj$resid[[7]]) %*% X %*% XXi
+  covmat.glm.pi.qad <- XXi2 %*% t(X2) %*% diag(res2$proj$resid[[4]]*res2$proj$resid[[8]]) %*% X2 %*% XXi2
+  
+  proj.lin.np.dr.cov  <- c(1, point$X) %*% covmat.np.dr.lin %*% c(1, point$X)
+  proj.lin.np.pi.cov  <- c(1, point$X) %*% covmat.np.pi.lin %*% c(1, point$X)
+  proj.lin.glm.dr.cov <- c(1, point$X) %*% covmat.glm.dr.lin %*% c(1, point$X)
+  proj.lin.glm.pi.cov <- c(1, point$X) %*% covmat.glm.pi.lin %*% c(1, point$X)
+
+  proj.qad.np.dr.cov <- c(1, point$X, point$X^2) %*% covmat.np.dr.qad %*% c(1, point$X, point$X^2)
+  proj.qad.np.pi.cov <- c(1, point$X, point$X^2) %*% covmat.np.pi.qad %*% c(1, point$X, point$X^2)
+  proj.qad.glm.dr.cov <- c(1, point$X, point$X^2) %*% covmat.glm.dr.qad %*% c(1, point$X, point$X^2)
+  proj.qad.glm.pi.cov <- c(1, point$X, point$X^2) %*% covmat.glm.pi.qad %*% c(1, point$X, point$X^2)
+  
+  #drl.pred.ss.prop2  <- drl.pred.ss / drl.pred.ss.te  
+  drl.pred.nss.prop2 <- drl.pred.nss / drl.pred.nss.te
+  #plugin.pred.ss.prop2  <- plugin.pred.ss / plugin.pred.ss.te
+  plugin.pred.nss.prop2 <- plugin.pred.nss / plugin.pred.nss.te
+  
+  proj.pred.lin.glm.prop2  <- proj.pred.lin.glm / proj.pred.lin.glm.te
+  proj.pred.quad.glm.prop2 <- proj.pred.quad.glm / proj.pred.quad.glm.te 
+  proj.pred.lin.np.prop2   <-  proj.pred.lin.np / proj.pred.lin.np.te
+  proj.pred.quad.np.prop2  <- proj.pred.quad.np / proj.pred.quad.np.te
+  
+  proj.pred.lin.glm.plugin.prop2  <- proj.pred.lin.glm.plugin / proj.pred.lin.glm.plugin.te
+  proj.pred.quad.glm.plugin.prop2 <- proj.pred.quad.glm.plugin / proj.pred.quad.glm.plugin.te
+  proj.pred.lin.np.plugin.prop2   <- proj.pred.lin.np.plugin / proj.pred.lin.np.plugin.te  
+  proj.pred.quad.np.plugin.prop2  <- proj.pred.quad.np.plugin / proj.pred.quad.np.plugin.te
+  
+  #drl.pred.ss.var.prop2 <- drl.pred.ss.prop2^2 * (drl.pred.ss.var / drl.pred.ss^2 + drl.pred.ss.var.te / drl.pred.ss.te^2)
+  drl.pred.nss.var.prop2 <- drl.pred.nss.prop2^2 * (drl.pred.nss.var / drl.pred.nss^2 + drl.pred.nss.var.te / drl.pred.nss.te^2)
+  #plugin.pred.ss.var.prop2 <- NA
+  plugin.pred.nss.var.prop2 <- NA
+  
+  proj.lin.glm.var.prop2  <- proj.pred.lin.glm.prop2^2 * (proj.lin.glm.var / proj.pred.lin.glm^2 + 
+                                                            proj.lin.glm.var.te / proj.pred.lin.glm.te^2 -
+                                                            2 * proj.lin.glm.dr.cov / (proj.pred.lin.glm * proj.pred.lin.glm.te))
+  proj.quad.glm.var.prop2 <- proj.pred.quad.glm.prop2^2 * (proj.quad.glm.var / proj.pred.quad.glm^2 + 
+                                                             proj.quad.glm.var.te / proj.pred.quad.glm.te^2 -
+                                                             2 * proj.qad.glm.dr.cov / (proj.pred.quad.glm*proj.pred.quad.glm.te))
+  proj.lin.np.var.prop2   <- proj.pred.lin.np.prop2^2 * (proj.lin.np.var / proj.pred.lin.np^2 + 
+                                                           proj.lin.np.var.te / proj.pred.lin.np.te^2 -
+                                                           2 * proj.lin.np.dr.cov / (proj.pred.lin.np * proj.pred.lin.np.te))
+  proj.quad.np.var.prop2  <- proj.pred.quad.np.prop2^2 * (proj.quad.np.var / proj.pred.quad.np^2 + 
+                                                            proj.quad.np.var.te / proj.pred.quad.np.te^2 -
+                                                            2 * proj.qad.np.dr.cov / (proj.pred.quad.np * proj.pred.quad.np.te))
+  
+  proj.lin.glm.var.pi.prop2  <- proj.pred.lin.glm.plugin.prop2^2 * (proj.lin.glm.var.pi / proj.pred.lin.glm.plugin^2 + 
+                                                                      proj.lin.glm.var.pi.te / proj.pred.lin.glm.plugin.te^2 -
+                                                                      2 * proj.lin.glm.pi.cov / (proj.pred.lin.glm.plugin * proj.pred.lin.glm.plugin.te))
+  proj.quad.glm.var.pi.prop2 <- proj.pred.quad.glm.plugin.prop2^2 * (proj.quad.glm.var.pi / proj.pred.quad.glm.plugin^2 + 
+                                                                       proj.quad.glm.var.pi.te / proj.pred.quad.glm.plugin.te^2 -
+                                                                       2 * proj.qad.glm.pi.cov / (proj.pred.quad.glm.plugin * proj.pred.quad.glm.plugin.te)) 
+  proj.lin.np.var.pi.prop2   <- proj.pred.lin.np.plugin.prop2^2 * (proj.lin.np.var.pi / proj.pred.lin.np.plugin^2 + 
+                                                                     proj.lin.np.var.pi.te / proj.pred.lin.np.plugin.te^2 -
+                                                                     2 * proj.lin.np.pi.cov / (proj.pred.lin.np.plugin * proj.pred.lin.np.plugin.te))
+  proj.quad.np.var.pi.prop2  <- proj.pred.quad.np.plugin.prop2^2 * (proj.quad.np.var.pi / proj.pred.quad.np.plugin^2 + 
+                                                                      proj.quad.np.var.pi.te / proj.pred.quad.np.plugin.te^2 -
+                                                                      2 * proj.qad.np.pi.cov / (proj.pred.quad.np.plugin * proj.pred.quad.np.plugin.te)) 
+  
+  res_prop2 <- tibble(
+    ests = c(proj.pred.lin.glm.prop2, proj.pred.quad.glm.prop2, 
+             proj.pred.lin.np.prop2, proj.pred.quad.np.prop2,
+             #drl.pred.ss.prop2, 
+             drl.pred.nss.prop2,
+             #plugin.pred.ss.prop2, 
+             plugin.pred.nss.prop2,
+             proj.pred.lin.glm.plugin.prop2, proj.pred.quad.glm.plugin.prop2, 
+             proj.pred.lin.np.plugin.prop2, proj.pred.quad.np.plugin.prop2),
+    var = c(proj.lin.glm.var.prop2, proj.quad.glm.var.prop2, 
+            proj.lin.np.var.prop2, proj.quad.np.var.prop2, 
+            #drl.pred.ss.var.prop2, 
+            drl.pred.nss.var.prop2,
+            #plugin.pred.ss.var.prop2, 
+            plugin.pred.nss.var.prop2,
+            proj.lin.glm.var.pi.prop2, proj.quad.glm.var.pi.prop2, 
+            proj.lin.np.var.pi.prop2, proj.quad.np.var.pi.prop2)) %>%
+    unnest() %>%
+    mutate(
+      lci = ests - 1.96*sqrt(var), uci = ests + 1.96*sqrt(var),
+      type = c("Projection-Linear", "Projection-Quad", 
+               "Projection-Linear", "Projection-Quad",
+               #"DRLearner", "DRLearner", 
+               #"Plugin-DRL", "Plugin-DRL",
+               "DRLearner", "Plugin-DRL",
+               "Proj-Lin-PI", "Proj-Quad-PI", 
+               "Proj-Lin-PI", "Proj-Quad-PI"),
+      estimand = "Proportion mediated alt",
+      nuisance_est = c("GLM", "GLM", "NP", "NP", "NP",
+                       "NP", "GLM", "GLM", "NP", "NP"),
+      #sample_split = c(NA, NA, NA, NA, "Yes", "No", "Yes", "No", NA, NA, NA, NA),
       truth = truth_vector$proportion)
   
   
-  res <- bind_rows(res_med, res_te, res_prop)
+  res <- bind_rows(res_med, res_te, res_prop, res_prop2)
   
   return(res)
 }
@@ -592,20 +751,21 @@ RunExperiments <- function(nsims, population, sample_size, point_value, sl.libs)
   for (i in 1:nsims) {
     data_sample <- sample_n(population, sample_size * 6)
     
-    folds <- ntile(runif(sample_size * 6, 0, 1), 6)
-    folds <- map(1:6, ~folds == .x)
+    folds <- ntile(runif(sample_size * 2, 0, 1), 6)
+    folds <- map(1:2, ~folds == .x)
     folds <- map(folds, ~data_sample[.x, ]) 
     
-    folds.1a <- invoke(rbind, folds[1:5])
-    folds.1b <- folds[[6]]
-    folds.1  <- append(list(folds.1a), list(folds.1b))
+    #folds.1a <- invoke(rbind, folds[1:5])
+    #folds.1b <- folds[[6]]
+    #folds.1  <- append(list(folds.1a), list(folds.1b))
     
-    res1 <- EstimateCATEFuns(folds, sl.libs, sample_split = TRUE)
-    res2 <- EstimateCATEFuns(folds.1, sl.libs, sample_split = FALSE)
-    res3 <- EstimateCATEFuns(folds.1, sl.libs = "SL.glm", sample_split = FALSE)
+    #res1 <- EstimateCATEFuns(folds, sl.libs, sample_split = TRUE)
+    res1 <- EstimateCATEFuns(folds, sl.libs, sample_split = FALSE)
+    res2 <- EstimateCATEFuns(folds, sl.libs = "SL.glm", sample_split = FALSE)
     
-    res_list <- list(res1, res2, res3)
-    res[[i]] <- ProcessResults(res_list, point_value, folds.1b, truth_vector)
+    #res_list <- list(res1, res2, res3)
+    res_list <- list(res1, res2)
+    res[[i]] <- ProcessResults(res_list, point_value, folds[[2]], truth_vector)
   }
   return(res)
 }
@@ -732,19 +892,19 @@ CalcTruth <- function(population, point) {
   
   mediation <- c(point.truth.lin, point.truth.qad, 
            point.truth.lin, point.truth.qad, 
-           truth, truth, truth, truth, 
+           truth, truth, #truth, truth, 
            point.truth.lin, point.truth.qad, 
            point.truth.lin, point.truth.qad)
 
   total_effect <- c(point.truth.lin.te, point.truth.qad.te, 
                  point.truth.lin.te, point.truth.qad.te, 
-                 truth.te, truth.te, truth.te, truth.te, 
+                 truth.te, truth.te, #truth.te, truth.te, 
                  point.truth.lin.te, point.truth.qad.te, 
                  point.truth.lin.te, point.truth.qad.te)
   
   proportion <- c(point.truth.lin.prop, point.truth.qad.prop, 
                   point.truth.lin.prop, point.truth.qad.prop, 
-                  truth.prop, truth.prop, truth.prop, truth.prop, 
+                  truth.prop, truth.prop, #truth.prop, truth.prop, 
                   point.truth.lin.prop, point.truth.qad.prop, 
                   point.truth.lin.prop, point.truth.qad.prop)
   

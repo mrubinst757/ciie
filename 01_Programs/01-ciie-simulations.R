@@ -1,5 +1,5 @@
-fs::file_copy("../../Depression/Programs/01_Analysis/02_AnalyzeData/00-mediation-functions.R",
-          "01_Programs/00-mediation-functions.R", TRUE)
+#fs::file_copy("../../Depression/Programs/01_Analysis/02_AnalyzeData/00-mediation-functions.R",
+#          "01_Programs/00-mediation-functions.R", TRUE)
 source("01_Programs/simulation-funs.R")
 source("01_Programs/00-mediation-functions.R")
 library(SuperLearner)
@@ -27,7 +27,21 @@ set.seed(100)
 population  <- GeneratePopulation(1000000, "binary")
 
 # Test 1: Projection and DRL learner at points X = {0, 2} using SuperLearner
-test.p2 <- RunExperiments(1000, population, 1000, tibble(X = 2), c("SL.glm", "SL.ranger"))
+test.01 <- RunExperiments(50, population, 1000, tibble(X = 0), c("SL.glm"))
+test.02 <- RunExperiments(50, population, 2000, tibble(X = 0), c("SL.glm"))
+test.03 <- RunExperiments(50, population, 10000, tibble(X = 0), c("SL.glm"))
+
+test.res <- map(list(test.01, test.02, test.03), ~.x %>%
+  map(~filter(.x, grepl("Proportion", estimand))) %>%
+  map(~filter(.x, nuisance_est == "GLM" | grepl("DRL", type))) %>%
+  invoke(rbind, .) %>%
+  group_by(estimand, type, nuisance_est) %>%
+  mutate(captured = ifelse(truth > lci & truth < uci, 1, 0)) %>%
+  summarize_all(mean) %>%
+  arrange(type, nuisance_est))
+
+saveRDS(test.res, "02_Output/prop-med-test.rds")
+test.res
 test.p0 <- RunExperiments(1000, population, 1000, tibble(X = 0), c("SL.glm", "SL.ranger"))
 test.p2.n2k <- RunExperiments(1000, population, 2000, tibble(X = 2), c("SL.glm", "SL.ranger"))
 test.p0.n2k <- RunExperiments(1000, population, 2000, tibble(X = 0), c("SL.glm", "SL.ranger"))
