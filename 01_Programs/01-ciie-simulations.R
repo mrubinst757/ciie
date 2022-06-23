@@ -41,10 +41,12 @@ test.res <- map(list(test.01, test.02, test.03), ~.x %>%
   arrange(type, nuisance_est))
 
 saveRDS(test.res, "02_Output/prop-med-test.rds")
-test.res
-test.p0 <- RunExperiments(1000, population, 1000, tibble(X = 0), c("SL.glm", "SL.ranger"))
-test.p2.n2k <- RunExperiments(1000, population, 2000, tibble(X = 2), c("SL.glm", "SL.ranger"))
-test.p0.n2k <- RunExperiments(1000, population, 2000, tibble(X = 0), c("SL.glm", "SL.ranger"))
+
+# Run programs
+test.p0 <- RunExperiments(250, population, 1000, tibble(X = 0), c("SL.glm", "SL.ranger"))
+test.p2 <- RunExperiments(250, population, 1000, tibble(X = 2), c("SL.glm", "SL.ranger"))
+test.p0.n2k <- RunExperiments(250, population, 2000, tibble(X = 0), c("SL.glm", "SL.ranger"))
+test.p2.n2k <- RunExperiments(250, population, 2000, tibble(X = 2), c("SL.glm", "SL.ranger"))
 
 saveRDS(list(test.p0 = test.p0, test.p2 = test.p2), "02_Output/simulations-1k-p2.rds")
 saveRDS(list(test.p0.n2k = test.p0.n2k, test.p2.n2k = test.p2.n2k), "02_Output/simulations-2k-p1.rds")
