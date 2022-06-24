@@ -43,29 +43,27 @@ test.res <- map(list(test.01, test.02, test.03), ~.x %>%
 saveRDS(test.res, "02_Output/prop-med-test.rds")
 
 # Run programs
-test.p0 <- RunExperiments(250, population, 1000, tibble(X = 0), c("SL.glm", "SL.ranger"))
-test.p2 <- RunExperiments(250, population, 1000, tibble(X = 2), c("SL.glm", "SL.ranger"))
-test.p0.n2k <- RunExperiments(250, population, 2000, tibble(X = 0), c("SL.glm", "SL.ranger"))
-test.p2.n2k <- RunExperiments(250, population, 2000, tibble(X = 2), c("SL.glm", "SL.ranger"))
+test.p0 <- RunExperiments(750, population, 1000, tibble(X = 0), c("SL.glm", "SL.ranger"))
+test.p2 <- RunExperiments(750, population, 1000, tibble(X = 2), c("SL.glm", "SL.ranger"))
+test.p0.n2k <- RunExperiments(750, population, 2000, tibble(X = 0), c("SL.glm", "SL.ranger"))
+test.p2.n2k <- RunExperiments(750, population, 2000, tibble(X = 2), c("SL.glm", "SL.ranger"))
 
-saveRDS(list(test.p0 = test.p0, test.p2 = test.p2), "02_Output/simulations-1k-p2.rds")
-saveRDS(list(test.p0.n2k = test.p0.n2k, test.p2.n2k = test.p2.n2k), "02_Output/simulations-2k-p1.rds")
+saveRDS(list(test.p0 = test.p0, test.p2 = test.p2), "02_Output/simulations-1k-p1.rds")
+saveRDS(list(test.p0.n2k = test.p0.n2k, test.p2.n2k = test.p2.n2k), "02_Output/simulations-2k-p2.rds")
 
 # Test 2: Compare DRL and Oracle across range of convergence rates
 set.seed(NULL)
-test1 <- DRLConvergenceTest(population, 900, mu_rate = 0.4, pi_rate = 0.4, m_rate = 0.4, m1_rate = 0.4, m2_rate = 0.4) # All 0.4
-test2 <- DRLConvergenceTest(population, 900, mu_rate = 0.1, pi_rate = 0.4, m_rate = 0.4, m1_rate = 0.4, m2_rate = 0.4) # mu slow
-test3 <- DRLConvergenceTest(population, 900, mu_rate = 0.4, pi_rate = 0.4, m_rate = 0.4, m1_rate = 0.1, m2_rate = 0.4) # m1 slow
-test4 <- DRLConvergenceTest(population, 900, mu_rate = 0.4, pi_rate = 0.4, m_rate = 0.4, m1_rate = 0.4, m2_rate = 0.1) # m2 slow
-test5 <- DRLConvergenceTest(population, 900, mu_rate = 0.1, pi_rate = 0.1, m_rate = 0.1, m1_rate = 0.1, m2_rate = 0.1) # All 0.1
-test6 <- DRLConvergenceTest(population, 900, mu_rate = 0.4, pi_rate = 0.1, m_rate = 0.4, m1_rate = 0.4, m2_rate = 0.4) # pi slow
-test7 <- DRLConvergenceTest(population, 900, mu_rate = 0.4, pi_rate = 0.4, m_rate = 0.1, m1_rate = 0.4, m2_rate = 0.4) # m slow
+test1 <- DRLConvergenceTest(population, 1000, mu_rate = 0.5, pi_rate = 0.5, m_rate = 0.5, m1_rate = 0.5, m2_rate = 0.5) # All 0.5
+test2 <- DRLConvergenceTest(population, 1000, mu_rate = 0.1, pi_rate = 0.5, m_rate = 0.5, m1_rate = 0.5, m2_rate = 0.5) # mu slow
+test3 <- DRLConvergenceTest(population, 1000, mu_rate = 0.5, pi_rate = 0.5, m_rate = 0.5, m1_rate = 0.1, m2_rate = 0.5) # m1 slow
+test4 <- DRLConvergenceTest(population, 1000, mu_rate = 0.5, pi_rate = 0.5, m_rate = 0.5, m1_rate = 0.5, m2_rate = 0.1) # m2 slow
+test5 <- DRLConvergenceTest(population, 1000, mu_rate = 0.1, pi_rate = 0.1, m_rate = 0.1, m1_rate = 0.1, m2_rate = 0.1) # All 0.1
+test6 <- DRLConvergenceTest(population, 1000, mu_rate = 0.5, pi_rate = 0.1, m_rate = 0.5, m1_rate = 0.5, m2_rate = 0.5) # pi slow
+test7 <- DRLConvergenceTest(population, 1000, mu_rate = 0.5, pi_rate = 0.5, m_rate = 0.1, m1_rate = 0.5, m2_rate = 0.5) # m slow
 
 # --
-
 test <- list(test1, test2, test3, test4, test5, test6, test7)
-
-saveRDS(test, "02_Output/sim-test-1-p2.rds")
+saveRDS(test, "02_Output/sim-test-1.rds")
 
 test <- readRDS("02_Output/sim-test-1.rds")
 
