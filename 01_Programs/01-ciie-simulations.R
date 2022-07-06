@@ -3,7 +3,7 @@
 source("01_Programs/simulation-funs.R")
 source("01_Programs/00-mediation-functions.R")
 library(SuperLearner)
-
+DRLConvergenceTest
 TProc <- function(result, rate) {
   t1 <- map(result, ~map(.x, ~.x$res)) %>%
     map(~invoke(rbind, .x) %>% as_tibble()) %>%
