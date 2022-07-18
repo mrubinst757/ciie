@@ -1,5 +1,4 @@
-library(tidyverse)
-library(gt)
+library(tidyverse); library(gt)
 
 # 1. Prediction at X = \{0, 2\}
 

@@ -398,6 +398,17 @@ EstimateCATEFuns <- function(folds, sl.libs, sample_split, return_data = FALSE) 
                        mu1.mod.te = y1_mod.te,
                        mu0.mod.te = y0_mod.te)
   
+  statistics <- tibble(
+    max_pi1_inv = max(test_dat$A / test_dat$pi),
+    max_pi0_inv = max((1 - test_dat$A) / (1-test_dat$pi)),
+    max_gamma_pi_inv = max(test_dat$A / (test_dat$pi * test_dat$gamma.a1.m.obs)),
+    max_gamma_pi_prop_inv = max(test_dat$A / (test_dat$pi * test_dat$gamma.a1.m.obs * test_dat$eif_te_2)),
+    max_pi1_prop_inv = max(test_dat$A / (test_dat$pi * (test_dat$eif_te_2^2))),
+    max_pi0_prop_inv = max((1 - test_dat$A) / ((1 - test_dat$pi) * (test_dat$eif_te_2^2))),
+    max_te_inv  = max(1/test_dat$eif_te_2),
+    max_te_inv2 = max(1/(test_dat$eif_te_2^2))
+  )
+  
   if (return_data == TRUE) {
     res <- list(proj = res.projection, 
                 drl_model = list(drl_model = drl_model, 
@@ -411,7 +422,8 @@ EstimateCATEFuns <- function(folds, sl.libs, sample_split, return_data = FALSE) 
                 drl_model = list(drl_model = drl_model, 
                                  drl_model_te = drl_model_te,
                                  drl_model_prop = drl_model_prop), 
-                plugin = plugin_model)
+                plugin = plugin_model,
+                stats = statistics)
   }
   return(res)
 }
@@ -429,6 +441,8 @@ ProcessResults <- function(result_list, point, test_data, truth_vector) {
   #res1 <- result_list[[1]]
   res1 <- result_list[[1]] #non-parametric nuisance estimation
   res2 <- result_list[[2]] #parametric nuisance estimation
+  stats_np  <- result_list[[1]]$stats
+  stats_glm <- result_list[[2]]$stats
   
   # IIE via M1
   #drl.pred.ss  <- predict(res1$drl_model$drl_model, point)$y
@@ -729,8 +743,10 @@ ProcessResults <- function(result_list, point, test_data, truth_vector) {
       truth = truth_vector$proportion)
   
   
-  res <- bind_rows(res_med, res_te, res_prop, res_prop2)
-  
+  res_main <- bind_rows(res_med, res_te, res_prop, res_prop2)
+  res_stat <- list(stats_glm = stats_glm, stats_np = stats_np)
+  res <- list(res_main = res_main, res_stat = res_stat)
+    
   return(res)
 }
 
@@ -755,15 +771,9 @@ RunExperiments <- function(nsims, population, sample_size, point_value, sl.libs)
     folds <- map(1:2, ~folds == .x)
     folds <- map(folds, ~data_sample[.x, ]) 
     
-    #folds.1a <- invoke(rbind, folds[1:5])
-    #folds.1b <- folds[[6]]
-    #folds.1  <- append(list(folds.1a), list(folds.1b))
-    
-    #res1 <- EstimateCATEFuns(folds, sl.libs, sample_split = TRUE)
     res1 <- EstimateCATEFuns(folds, sl.libs, sample_split = FALSE)
     res2 <- EstimateCATEFuns(folds, sl.libs = "SL.glm", sample_split = FALSE)
     
-    #res_list <- list(res1, res2, res3)
     res_list <- list(res1, res2)
     res[[i]] <- ProcessResults(res_list, point_value, folds[[2]], truth_vector)
   }
